@@ -648,7 +648,6 @@ mod test {
         )
         .await;
 
-        // Configure settings explicitly for all tests
         cx.update(|cx| {
             use gpui::UpdateGlobal;
             use project::WorktreeSettings;
