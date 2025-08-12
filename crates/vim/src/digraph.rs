@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use collections::HashMap;
 use editor::Editor;
-use gpui::{App, Context, Keystroke, KeystrokeEvent, Window, impl_actions};
+use gpui::{Action, App, Context, Keystroke, KeystrokeEvent, Window};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use settings::Settings;
@@ -12,9 +12,9 @@ use crate::{Vim, VimSettings, state::Operator};
 
 mod default;
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq, Action)]
+#[action(namespace = vim)]
 struct Literal(String, char);
-impl_actions!(vim, [Literal]);
 
 pub(crate) fn register(editor: &mut Editor, cx: &mut Context<Vim>) {
     Vim::action(editor, cx, Vim::literal)
@@ -56,9 +56,7 @@ impl Vim {
 
         self.pop_operator(window, cx);
         if self.editor_input_enabled() {
-            self.update_editor(window, cx, |_, editor, window, cx| {
-                editor.insert(&text, window, cx)
-            });
+            self.update_editor(cx, |_, editor, cx| editor.insert(&text, window, cx));
         } else {
             self.input_ignored(text, window, cx);
         }
@@ -214,9 +212,7 @@ impl Vim {
         text.push_str(suffix);
 
         if self.editor_input_enabled() {
-            self.update_editor(window, cx, |_, editor, window, cx| {
-                editor.insert(&text, window, cx)
-            });
+            self.update_editor(cx, |_, editor, cx| editor.insert(&text, window, cx));
         } else {
             self.input_ignored(text.into(), window, cx);
         }
