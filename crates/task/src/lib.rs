@@ -339,6 +339,7 @@ pub enum Shell {
 enum WindowsShellType {
     Powershell,
     Cmd,
+    GitBash,
     Other,
 }
 
@@ -421,6 +422,9 @@ impl ShellBuilder {
             WindowsShellType::Cmd => {
                 format!("{} /C '{}'", self.program, command_label)
             }
+            WindowsShellType::GitBash => {
+                format!("{} -c '{}'", self.program, command_label)
+            }
             WindowsShellType::Other => {
                 format!("{} -i -c '{}'", self.program, command_label)
             }
@@ -440,6 +444,10 @@ impl ShellBuilder {
         match self.windows_shell_type() {
             WindowsShellType::Powershell => self.args.extend(["-C".to_owned(), combined_command]),
             WindowsShellType::Cmd => self.args.extend(["/C".to_owned(), combined_command]),
+            WindowsShellType::GitBash => {
+                self.args
+                    .extend(["-i".to_owned(), "-c".to_owned(), combined_command])
+            }
             WindowsShellType::Other => {
                 self.args
                     .extend(["-i".to_owned(), "-c".to_owned(), combined_command])
@@ -457,6 +465,11 @@ impl ShellBuilder {
             WindowsShellType::Powershell
         } else if self.program == "cmd" || self.program.ends_with("cmd.exe") {
             WindowsShellType::Cmd
+        } else if self.program == "git-bash"
+            || self.program == "bash"
+            || self.program.ends_with("git-bash.exe")
+        {
+            WindowsShellType::GitBash
         } else {
             // Someother shell detected, the user might install and use a
             // unix-like shell.
@@ -476,6 +489,7 @@ impl ShellBuilder {
         match self.windows_shell_type() {
             WindowsShellType::Powershell => Self::to_powershell_variable(input),
             WindowsShellType::Cmd => Self::to_cmd_variable(input),
+            WindowsShellType::GitBash => Self::to_gitbash_variable(input),
             WindowsShellType::Other => input,
         }
     }
@@ -512,6 +526,25 @@ impl ShellBuilder {
         } else if let Some(var_str) = input.strip_prefix('$') {
             // If the input starts with "$", directly append to "$env:"
             format!("$env:{}", var_str)
+        } else {
+            // If no prefix is found, return the input as is
+            input
+        }
+    }
+
+    fn to_gitbash_variable(input: String) -> String {
+        if let Some(var_str) = input.strip_prefix("${") {
+            if var_str.find(':').is_none() {
+                // If the input starts with "${", remove the trailing "}"
+                format!("${}", &var_str[..var_str.len() - 1])
+            } else {
+                // `${SOME_VAR:-SOME_DEFAULT}`, we currently do not handle this situation,
+                // which will result in the task failing to run in such cases.
+                input
+            }
+        } else if let Some(var_str) = input.strip_prefix('$') {
+            // If the input starts with "$", directly append to "$env:"
+            format!("${}", var_str)
         } else {
             // If no prefix is found, return the input as is
             input
