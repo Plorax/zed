@@ -18,7 +18,7 @@ use util::{ResultExt, get_system_shell};
 
 use crate::UserPromptId;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Default, Debug, Clone, Serialize)]
 pub struct ProjectContext {
     pub worktrees: Vec<WorktreeContext>,
     /// Whether any worktree has a rules_file. Provided as a field because handlebars can't do this.
@@ -71,13 +71,14 @@ pub struct UserRulesContext {
     pub contents: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct WorktreeContext {
     pub root_name: String,
+    pub abs_path: Arc<Path>,
     pub rules_file: Option<RulesFileContext>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct RulesFileContext {
     pub path_in_worktree: Arc<Path>,
     pub text: String,
@@ -455,6 +456,7 @@ mod test {
     fn test_assistant_system_prompt_renders() {
         let worktrees = vec![WorktreeContext {
             root_name: "path".into(),
+            abs_path: Path::new("/path/to/root").into(),
             rules_file: Some(RulesFileContext {
                 path_in_worktree: Path::new(".rules").into(),
                 text: "".into(),
@@ -484,6 +486,7 @@ mod test {
     fn test_assistant_system_prompt_depends_on_enabled_tools() {
         let worktrees = vec![WorktreeContext {
             root_name: "path".into(),
+            abs_path: Path::new("/path/to/root").into(),
             rules_file: None,
         }];
         let default_user_rules = vec![];

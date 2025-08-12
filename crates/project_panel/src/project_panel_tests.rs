@@ -6,9 +6,9 @@ use project::{FakeFs, WorktreeSettings};
 use serde_json::json;
 use settings::SettingsStore;
 use std::path::{Path, PathBuf};
-use util::{path, separator};
+use util::path;
 use workspace::{
-    AppState, Pane,
+    AppState, ItemHandle, Pane,
     item::{Item, ProjectItem},
     register_project_item,
 };
@@ -309,6 +309,7 @@ async fn test_auto_collapse_dir_paths(cx: &mut gpui::TestAppContext) {
     )
     .await;
 
+    // Test 1: Multiple worktrees with auto_fold_dirs = true
     let project = Project::test(
         fs.clone(),
         [path!("/root1").as_ref(), path!("/root2").as_ref()],
@@ -331,10 +332,10 @@ async fn test_auto_collapse_dir_paths(cx: &mut gpui::TestAppContext) {
     assert_eq!(
         visible_entries_as_strings(&panel, 0..10, cx),
         &[
-            separator!("v root1"),
-            separator!("    > dir_1/nested_dir_1/nested_dir_2/nested_dir_3"),
-            separator!("v root2"),
-            separator!("    > dir_2"),
+            "v root1",
+            "    > dir_1/nested_dir_1/nested_dir_2/nested_dir_3",
+            "v root2",
+            "    > dir_2",
         ]
     );
 
@@ -346,14 +347,14 @@ async fn test_auto_collapse_dir_paths(cx: &mut gpui::TestAppContext) {
     assert_eq!(
         visible_entries_as_strings(&panel, 0..10, cx),
         &[
-            separator!("v root1"),
-            separator!("    v dir_1/nested_dir_1/nested_dir_2/nested_dir_3  <== selected"),
-            separator!("        > nested_dir_4/nested_dir_5"),
-            separator!("          file_a.java"),
-            separator!("          file_b.java"),
-            separator!("          file_c.java"),
-            separator!("v root2"),
-            separator!("    > dir_2"),
+            "v root1",
+            "    v dir_1/nested_dir_1/nested_dir_2/nested_dir_3  <== selected",
+            "        > nested_dir_4/nested_dir_5",
+            "          file_a.java",
+            "          file_b.java",
+            "          file_c.java",
+            "v root2",
+            "    > dir_2",
         ]
     );
 
@@ -365,33 +366,93 @@ async fn test_auto_collapse_dir_paths(cx: &mut gpui::TestAppContext) {
     assert_eq!(
         visible_entries_as_strings(&panel, 0..10, cx),
         &[
-            separator!("v root1"),
-            separator!("    v dir_1/nested_dir_1/nested_dir_2/nested_dir_3"),
-            separator!("        v nested_dir_4/nested_dir_5  <== selected"),
-            separator!("              file_d.java"),
-            separator!("          file_a.java"),
-            separator!("          file_b.java"),
-            separator!("          file_c.java"),
-            separator!("v root2"),
-            separator!("    > dir_2"),
+            "v root1",
+            "    v dir_1/nested_dir_1/nested_dir_2/nested_dir_3",
+            "        v nested_dir_4/nested_dir_5  <== selected",
+            "              file_d.java",
+            "          file_a.java",
+            "          file_b.java",
+            "          file_c.java",
+            "v root2",
+            "    > dir_2",
         ]
     );
     toggle_expand_dir(&panel, "root2/dir_2", cx);
     assert_eq!(
         visible_entries_as_strings(&panel, 0..10, cx),
         &[
-            separator!("v root1"),
-            separator!("    v dir_1/nested_dir_1/nested_dir_2/nested_dir_3"),
-            separator!("        v nested_dir_4/nested_dir_5"),
-            separator!("              file_d.java"),
-            separator!("          file_a.java"),
-            separator!("          file_b.java"),
-            separator!("          file_c.java"),
-            separator!("v root2"),
-            separator!("    v dir_2  <== selected"),
-            separator!("          file_1.java"),
+            "v root1",
+            "    v dir_1/nested_dir_1/nested_dir_2/nested_dir_3",
+            "        v nested_dir_4/nested_dir_5",
+            "              file_d.java",
+            "          file_a.java",
+            "          file_b.java",
+            "          file_c.java",
+            "v root2",
+            "    v dir_2  <== selected",
+            "          file_1.java",
         ]
     );
+
+    // Test 2: Single worktree with auto_fold_dirs = true and hide_root = true
+    {
+        let project = Project::test(fs.clone(), [path!("/root1").as_ref()], cx).await;
+        let workspace =
+            cx.add_window(|window, cx| Workspace::test_new(project.clone(), window, cx));
+        let cx = &mut VisualTestContext::from_window(*workspace, cx);
+        cx.update(|_, cx| {
+            let settings = *ProjectPanelSettings::get_global(cx);
+            ProjectPanelSettings::override_global(
+                ProjectPanelSettings {
+                    auto_fold_dirs: true,
+                    hide_root: true,
+                    ..settings
+                },
+                cx,
+            );
+        });
+        let panel = workspace.update(cx, ProjectPanel::new).unwrap();
+        assert_eq!(
+            visible_entries_as_strings(&panel, 0..10, cx),
+            &["> dir_1/nested_dir_1/nested_dir_2/nested_dir_3"],
+            "Single worktree with hide_root=true should hide root and show auto-folded paths"
+        );
+
+        toggle_expand_dir(
+            &panel,
+            "root1/dir_1/nested_dir_1/nested_dir_2/nested_dir_3",
+            cx,
+        );
+        assert_eq!(
+            visible_entries_as_strings(&panel, 0..10, cx),
+            &[
+                "v dir_1/nested_dir_1/nested_dir_2/nested_dir_3  <== selected",
+                "    > nested_dir_4/nested_dir_5",
+                "      file_a.java",
+                "      file_b.java",
+                "      file_c.java",
+            ],
+            "Expanded auto-folded path with hidden root should show contents without root prefix"
+        );
+
+        toggle_expand_dir(
+            &panel,
+            "root1/dir_1/nested_dir_1/nested_dir_2/nested_dir_3/nested_dir_4/nested_dir_5",
+            cx,
+        );
+        assert_eq!(
+            visible_entries_as_strings(&panel, 0..10, cx),
+            &[
+                "v dir_1/nested_dir_1/nested_dir_2/nested_dir_3",
+                "    v nested_dir_4/nested_dir_5  <== selected",
+                "          file_d.java",
+                "      file_a.java",
+                "      file_b.java",
+                "      file_c.java",
+            ],
+            "Nested expansion with hidden root should maintain proper indentation"
+        );
+    }
 }
 
 #[gpui::test(iterations = 30)]
@@ -2475,6 +2536,7 @@ async fn test_select_directory(cx: &mut gpui::TestAppContext) {
         ]
     );
 }
+
 #[gpui::test]
 async fn test_select_first_last(cx: &mut gpui::TestAppContext) {
     init_test_with_editor(cx);
@@ -2542,6 +2604,46 @@ async fn test_select_first_last(cx: &mut gpui::TestAppContext) {
             "      file_1.py",
             "      file_2.py  <== selected",
         ]
+    );
+
+    cx.update(|_, cx| {
+        let settings = *ProjectPanelSettings::get_global(cx);
+        ProjectPanelSettings::override_global(
+            ProjectPanelSettings {
+                hide_root: true,
+                ..settings
+            },
+            cx,
+        );
+    });
+
+    let panel = workspace.update(cx, ProjectPanel::new).unwrap();
+
+    #[rustfmt::skip]
+    assert_eq!(
+        visible_entries_as_strings(&panel, 0..10, cx),
+        &[
+            "> dir_1",
+            "> zdir_2",
+            "  file_1.py",
+            "  file_2.py",
+        ],
+        "With hide_root=true, root should be hidden"
+    );
+
+    panel.update_in(cx, |panel, window, cx| {
+        panel.select_first(&SelectFirst, window, cx)
+    });
+
+    assert_eq!(
+        visible_entries_as_strings(&panel, 0..10, cx),
+        &[
+            "> dir_1  <== selected",
+            "> zdir_2",
+            "  file_1.py",
+            "  file_2.py",
+        ],
+        "With hide_root=true, first entry should be dir_1, not the hidden root"
     );
 }
 
@@ -2790,6 +2892,101 @@ async fn test_rename_root_of_worktree(cx: &mut gpui::TestAppContext) {
 }
 
 #[gpui::test]
+async fn test_rename_with_hide_root(cx: &mut gpui::TestAppContext) {
+    init_test_with_editor(cx);
+
+    let fs = FakeFs::new(cx.executor().clone());
+    fs.insert_tree(
+        "/root1",
+        json!({
+            "dir1": { "file1.txt": "content" },
+            "file2.txt": "content",
+        }),
+    )
+    .await;
+    fs.insert_tree("/root2", json!({ "file3.txt": "content" }))
+        .await;
+
+    // Test 1: Single worktree, hide_root=true - rename should be blocked
+    {
+        let project = Project::test(fs.clone(), ["/root1".as_ref()], cx).await;
+        let workspace =
+            cx.add_window(|window, cx| Workspace::test_new(project.clone(), window, cx));
+        let cx = &mut VisualTestContext::from_window(*workspace, cx);
+
+        cx.update(|_, cx| {
+            let settings = *ProjectPanelSettings::get_global(cx);
+            ProjectPanelSettings::override_global(
+                ProjectPanelSettings {
+                    hide_root: true,
+                    ..settings
+                },
+                cx,
+            );
+        });
+
+        let panel = workspace.update(cx, ProjectPanel::new).unwrap();
+
+        panel.update(cx, |panel, cx| {
+            let project = panel.project.read(cx);
+            let worktree = project.visible_worktrees(cx).next().unwrap();
+            let root_entry = worktree.read(cx).root_entry().unwrap();
+            panel.selection = Some(SelectedEntry {
+                worktree_id: worktree.read(cx).id(),
+                entry_id: root_entry.id,
+            });
+        });
+
+        panel.update_in(cx, |panel, window, cx| panel.rename(&Rename, window, cx));
+
+        assert!(
+            panel.read_with(cx, |panel, _| panel.edit_state.is_none()),
+            "Rename should be blocked when hide_root=true with single worktree"
+        );
+    }
+
+    // Test 2: Multiple worktrees, hide_root=true - rename should work
+    {
+        let project = Project::test(fs.clone(), ["/root1".as_ref(), "/root2".as_ref()], cx).await;
+        let workspace =
+            cx.add_window(|window, cx| Workspace::test_new(project.clone(), window, cx));
+        let cx = &mut VisualTestContext::from_window(*workspace, cx);
+
+        cx.update(|_, cx| {
+            let settings = *ProjectPanelSettings::get_global(cx);
+            ProjectPanelSettings::override_global(
+                ProjectPanelSettings {
+                    hide_root: true,
+                    ..settings
+                },
+                cx,
+            );
+        });
+
+        let panel = workspace.update(cx, ProjectPanel::new).unwrap();
+        select_path(&panel, "root1", cx);
+        panel.update_in(cx, |panel, window, cx| panel.rename(&Rename, window, cx));
+
+        #[cfg(target_os = "windows")]
+        assert!(
+            panel.read_with(cx, |panel, _| panel.edit_state.is_none()),
+            "Rename should be blocked on Windows even with multiple worktrees"
+        );
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            assert!(
+                panel.read_with(cx, |panel, _| panel.edit_state.is_some()),
+                "Rename should work with multiple worktrees on non-Windows when hide_root=true"
+            );
+            panel.update_in(cx, |panel, window, cx| {
+                panel.cancel(&menu::Cancel, window, cx)
+            });
+        }
+    }
+}
+
+#[gpui::test]
 async fn test_multiple_marked_entries(cx: &mut gpui::TestAppContext) {
     init_test_with_editor(cx);
     let fs = FakeFs::new(cx.executor().clone());
@@ -2871,7 +3068,7 @@ async fn test_multiple_marked_entries(cx: &mut gpui::TestAppContext) {
         panel.update(cx, |this, cx| {
             let drag = DraggedSelection {
                 active_selection: this.selection.unwrap(),
-                marked_selections: Arc::new(this.marked_entries.clone()),
+                marked_selections: this.marked_entries.clone().into(),
             };
             let target_entry = this
                 .project
@@ -4720,12 +4917,12 @@ async fn test_expand_all_for_entry(cx: &mut gpui::TestAppContext) {
     assert_eq!(
         visible_entries_as_strings(&panel, 0..20, cx),
         &[
-            separator!("v root"),
-            separator!("    v dir1  <== selected"),
-            separator!("        > empty1/empty2/empty3"),
-            separator!("        > ignored_dir"),
-            separator!("        > subdir1"),
-            separator!("      .gitignore"),
+            "v root",
+            "    v dir1  <== selected",
+            "        > empty1/empty2/empty3",
+            "        > ignored_dir",
+            "        > subdir1",
+            "      .gitignore",
         ],
         "Should show first level with auto-folded dirs and ignored dir visible"
     );
@@ -4742,18 +4939,18 @@ async fn test_expand_all_for_entry(cx: &mut gpui::TestAppContext) {
     assert_eq!(
         visible_entries_as_strings(&panel, 0..20, cx),
         &[
-            separator!("v root"),
-            separator!("    v dir1  <== selected"),
-            separator!("        v empty1"),
-            separator!("            v empty2"),
-            separator!("                v empty3"),
-            separator!("                      file.txt"),
-            separator!("        > ignored_dir"),
-            separator!("        v subdir1"),
-            separator!("            > ignored_nested"),
-            separator!("              file1.txt"),
-            separator!("              file2.txt"),
-            separator!("      .gitignore"),
+            "v root",
+            "    v dir1  <== selected",
+            "        v empty1",
+            "            v empty2",
+            "                v empty3",
+            "                      file.txt",
+            "        > ignored_dir",
+            "        v subdir1",
+            "            > ignored_nested",
+            "              file1.txt",
+            "              file2.txt",
+            "      .gitignore",
         ],
         "After expand_all with auto-fold: should not expand ignored_dir, should expand folded dirs, and should not expand ignored_nested"
     );
@@ -4778,12 +4975,12 @@ async fn test_expand_all_for_entry(cx: &mut gpui::TestAppContext) {
     assert_eq!(
         visible_entries_as_strings(&panel, 0..20, cx),
         &[
-            separator!("v root"),
-            separator!("    v dir1  <== selected"),
-            separator!("        > empty1"),
-            separator!("        > ignored_dir"),
-            separator!("        > subdir1"),
-            separator!("      .gitignore"),
+            "v root",
+            "    v dir1  <== selected",
+            "        > empty1",
+            "        > ignored_dir",
+            "        > subdir1",
+            "      .gitignore",
         ],
         "With auto-fold disabled: should show all directories separately"
     );
@@ -4800,18 +4997,18 @@ async fn test_expand_all_for_entry(cx: &mut gpui::TestAppContext) {
     assert_eq!(
         visible_entries_as_strings(&panel, 0..20, cx),
         &[
-            separator!("v root"),
-            separator!("    v dir1  <== selected"),
-            separator!("        v empty1"),
-            separator!("            v empty2"),
-            separator!("                v empty3"),
-            separator!("                      file.txt"),
-            separator!("        > ignored_dir"),
-            separator!("        v subdir1"),
-            separator!("            > ignored_nested"),
-            separator!("              file1.txt"),
-            separator!("              file2.txt"),
-            separator!("      .gitignore"),
+            "v root",
+            "    v dir1  <== selected",
+            "        v empty1",
+            "            v empty2",
+            "                v empty3",
+            "                      file.txt",
+            "        > ignored_dir",
+            "        v subdir1",
+            "            > ignored_nested",
+            "              file1.txt",
+            "              file2.txt",
+            "      .gitignore",
         ],
         "After expand_all without auto-fold: should expand all dirs normally, \
          expand ignored_dir itself but not its subdirs, and not expand ignored_nested"
@@ -4830,20 +5027,20 @@ async fn test_expand_all_for_entry(cx: &mut gpui::TestAppContext) {
     assert_eq!(
         visible_entries_as_strings(&panel, 0..20, cx),
         &[
-            separator!("v root"),
-            separator!("    v dir1  <== selected"),
-            separator!("        v empty1"),
-            separator!("            v empty2"),
-            separator!("                v empty3"),
-            separator!("                      file.txt"),
-            separator!("        v ignored_dir"),
-            separator!("            v subdir"),
-            separator!("                  deep_file.txt"),
-            separator!("        v subdir1"),
-            separator!("            > ignored_nested"),
-            separator!("              file1.txt"),
-            separator!("              file2.txt"),
-            separator!("      .gitignore"),
+            "v root",
+            "    v dir1  <== selected",
+            "        v empty1",
+            "            v empty2",
+            "                v empty3",
+            "                      file.txt",
+            "        v ignored_dir",
+            "            v subdir",
+            "                  deep_file.txt",
+            "        v subdir1",
+            "            > ignored_nested",
+            "              file1.txt",
+            "              file2.txt",
+            "      .gitignore",
         ],
         "After expand_all on ignored_dir: should expand all contents of the ignored directory"
     );
@@ -4893,15 +5090,15 @@ async fn test_collapse_all_for_entry(cx: &mut gpui::TestAppContext) {
         assert_eq!(
             visible_entries_as_strings(&panel, 0..20, cx),
             &[
-                separator!("v root"),
-                separator!("    v dir1"),
-                separator!("        v subdir1"),
-                separator!("            v nested1"),
-                separator!("                  file1.txt"),
-                separator!("                  file2.txt"),
-                separator!("        v subdir2  <== selected"),
-                separator!("              file4.txt"),
-                separator!("    > dir2"),
+                "v root",
+                "    v dir1",
+                "        v subdir1",
+                "            v nested1",
+                "                  file1.txt",
+                "                  file2.txt",
+                "        v subdir2  <== selected",
+                "              file4.txt",
+                "    > dir2",
             ],
             "Initial state with everything expanded"
         );
@@ -4943,13 +5140,13 @@ async fn test_collapse_all_for_entry(cx: &mut gpui::TestAppContext) {
         assert_eq!(
             visible_entries_as_strings(&panel, 0..20, cx),
             &[
-                separator!("v root"),
-                separator!("    v dir1"),
-                separator!("        v subdir1/nested1  <== selected"),
-                separator!("              file1.txt"),
-                separator!("              file2.txt"),
-                separator!("        > subdir2"),
-                separator!("    > dir2/single_file"),
+                "v root",
+                "    v dir1",
+                "        v subdir1/nested1  <== selected",
+                "              file1.txt",
+                "              file2.txt",
+                "        > subdir2",
+                "    > dir2/single_file",
             ],
             "Initial state with some dirs expanded"
         );
@@ -4966,11 +5163,11 @@ async fn test_collapse_all_for_entry(cx: &mut gpui::TestAppContext) {
         assert_eq!(
             visible_entries_as_strings(&panel, 0..20, cx),
             &[
-                separator!("v root"),
-                separator!("    v dir1  <== selected"),
-                separator!("        > subdir1/nested1"),
-                separator!("        > subdir2"),
-                separator!("    > dir2/single_file"),
+                "v root",
+                "    v dir1  <== selected",
+                "        > subdir1/nested1",
+                "        > subdir2",
+                "    > dir2/single_file",
             ],
             "Subdirs should be collapsed and folded with auto-fold enabled"
         );
@@ -4998,14 +5195,14 @@ async fn test_collapse_all_for_entry(cx: &mut gpui::TestAppContext) {
         assert_eq!(
             visible_entries_as_strings(&panel, 0..20, cx),
             &[
-                separator!("v root"),
-                separator!("    v dir1"),
-                separator!("        v subdir1"),
-                separator!("            v nested1  <== selected"),
-                separator!("                  file1.txt"),
-                separator!("                  file2.txt"),
-                separator!("        > subdir2"),
-                separator!("    > dir2"),
+                "v root",
+                "    v dir1",
+                "        v subdir1",
+                "            v nested1  <== selected",
+                "                  file1.txt",
+                "                  file2.txt",
+                "        > subdir2",
+                "    > dir2",
             ],
             "Initial state with some dirs expanded and auto-fold disabled"
         );
@@ -5022,11 +5219,11 @@ async fn test_collapse_all_for_entry(cx: &mut gpui::TestAppContext) {
         assert_eq!(
             visible_entries_as_strings(&panel, 0..20, cx),
             &[
-                separator!("v root"),
-                separator!("    v dir1  <== selected"),
-                separator!("        > subdir1"),
-                separator!("        > subdir2"),
-                separator!("    > dir2"),
+                "v root",
+                "    v dir1  <== selected",
+                "        > subdir1",
+                "        > subdir2",
+                "    > dir2",
             ],
             "Subdirs should be collapsed but not folded with auto-fold disabled"
         );
@@ -5064,8 +5261,8 @@ async fn test_create_entries_without_selection(cx: &mut gpui::TestAppContext) {
     assert_eq!(
         visible_entries_as_strings(&panel, 0..20, cx),
         &[
-            separator!("v root"),
-            separator!("    > dir1"),
+            "v root",
+            "    > dir1",
         ],
         "Initial state with nothing selected"
     );
@@ -5090,11 +5287,160 @@ async fn test_create_entries_without_selection(cx: &mut gpui::TestAppContext) {
     assert_eq!(
         visible_entries_as_strings(&panel, 0..20, cx),
         &[
-            separator!("v root"),
-            separator!("    > dir1"),
-            separator!("      hello_from_no_selections  <== selected  <== marked"),
+            "v root",
+            "    > dir1",
+            "      hello_from_no_selections  <== selected  <== marked",
         ],
         "A new file is created under the root directory"
+    );
+}
+
+#[gpui::test]
+async fn test_create_entries_without_selection_hide_root(cx: &mut gpui::TestAppContext) {
+    init_test(cx);
+
+    let fs = FakeFs::new(cx.executor().clone());
+    fs.insert_tree(
+        path!("/root"),
+        json!({
+            "existing_dir": {
+                "existing_file.txt": "",
+            },
+            "existing_file.txt": "",
+        }),
+    )
+    .await;
+
+    let project = Project::test(fs.clone(), [path!("/root").as_ref()], cx).await;
+    let workspace = cx.add_window(|window, cx| Workspace::test_new(project.clone(), window, cx));
+    let cx = &mut VisualTestContext::from_window(*workspace, cx);
+
+    cx.update(|_, cx| {
+        let settings = *ProjectPanelSettings::get_global(cx);
+        ProjectPanelSettings::override_global(
+            ProjectPanelSettings {
+                hide_root: true,
+                ..settings
+            },
+            cx,
+        );
+    });
+
+    let panel = workspace
+        .update(cx, |workspace, window, cx| {
+            let panel = ProjectPanel::new(workspace, window, cx);
+            workspace.add_panel(panel.clone(), window, cx);
+            panel
+        })
+        .unwrap();
+
+    #[rustfmt::skip]
+    assert_eq!(
+        visible_entries_as_strings(&panel, 0..20, cx),
+        &[
+            "> existing_dir",
+            "  existing_file.txt",
+        ],
+        "Initial state with hide_root=true, root should be hidden and nothing selected"
+    );
+
+    panel.update(cx, |panel, _| {
+        assert!(
+            panel.selection.is_none(),
+            "Should have no selection initially"
+        );
+    });
+
+    // Test 1: Create new file when no entry is selected
+    panel.update_in(cx, |panel, window, cx| {
+        panel.new_file(&NewFile, window, cx);
+    });
+    panel.update_in(cx, |panel, window, cx| {
+        assert!(panel.filename_editor.read(cx).is_focused(window));
+    });
+
+    #[rustfmt::skip]
+    assert_eq!(
+        visible_entries_as_strings(&panel, 0..20, cx),
+        &[
+            "> existing_dir",
+            "  [EDITOR: '']  <== selected",
+            "  existing_file.txt",
+        ],
+        "Editor should appear at root level when hide_root=true and no selection"
+    );
+
+    let confirm = panel.update_in(cx, |panel, window, cx| {
+        panel.filename_editor.update(cx, |editor, cx| {
+            editor.set_text("new_file_at_root.txt", window, cx)
+        });
+        panel.confirm_edit(window, cx).unwrap()
+    });
+    confirm.await.unwrap();
+
+    #[rustfmt::skip]
+    assert_eq!(
+        visible_entries_as_strings(&panel, 0..20, cx),
+        &[
+            "> existing_dir",
+            "  existing_file.txt",
+            "  new_file_at_root.txt  <== selected  <== marked",
+        ],
+        "New file should be created at root level and visible without root prefix"
+    );
+
+    assert!(
+        fs.is_file(Path::new("/root/new_file_at_root.txt")).await,
+        "File should be created in the actual root directory"
+    );
+
+    // Test 2: Create new directory when no entry is selected
+    panel.update(cx, |panel, _| {
+        panel.selection = None;
+    });
+
+    panel.update_in(cx, |panel, window, cx| {
+        panel.new_directory(&NewDirectory, window, cx);
+    });
+    panel.update_in(cx, |panel, window, cx| {
+        assert!(panel.filename_editor.read(cx).is_focused(window));
+    });
+
+    #[rustfmt::skip]
+    assert_eq!(
+        visible_entries_as_strings(&panel, 0..20, cx),
+        &[
+            "> [EDITOR: '']  <== selected",
+            "> existing_dir",
+            "  existing_file.txt",
+            "  new_file_at_root.txt",
+        ],
+        "Directory editor should appear at root level when hide_root=true and no selection"
+    );
+
+    let confirm = panel.update_in(cx, |panel, window, cx| {
+        panel.filename_editor.update(cx, |editor, cx| {
+            editor.set_text("new_dir_at_root", window, cx)
+        });
+        panel.confirm_edit(window, cx).unwrap()
+    });
+    confirm.await.unwrap();
+
+    #[rustfmt::skip]
+    assert_eq!(
+        visible_entries_as_strings(&panel, 0..20, cx),
+        &[
+            "> existing_dir",
+            "v new_dir_at_root  <== selected",
+            "  existing_file.txt",
+            "  new_file_at_root.txt",
+        ],
+        "New directory should be created at root level and visible without root prefix"
+    );
+
+    assert!(
+        fs.is_dir(Path::new("/root/new_dir_at_root")).await,
+        "Directory should be created in the actual root directory"
     );
 }
 
@@ -5216,10 +5562,10 @@ async fn test_highlight_entry_for_selection_drag(cx: &mut gpui::TestAppContext) 
                 worktree_id,
                 entry_id: child_file.id,
             },
-            marked_selections: Arc::new(BTreeSet::from([SelectedEntry {
+            marked_selections: Arc::new([SelectedEntry {
                 worktree_id,
                 entry_id: child_file.id,
-            }])),
+            }]),
         };
         let result =
             panel.highlight_entry_for_selection_drag(parent_dir, worktree, &dragged_selection, cx);
@@ -5258,7 +5604,7 @@ async fn test_highlight_entry_for_selection_drag(cx: &mut gpui::TestAppContext) 
                 worktree_id,
                 entry_id: child_file.id,
             },
-            marked_selections: Arc::new(BTreeSet::from([
+            marked_selections: Arc::new([
                 SelectedEntry {
                     worktree_id,
                     entry_id: child_file.id,
@@ -5267,7 +5613,7 @@ async fn test_highlight_entry_for_selection_drag(cx: &mut gpui::TestAppContext) 
                     worktree_id,
                     entry_id: sibling_file.id,
                 },
-            ])),
+            ]),
         };
         let result =
             panel.highlight_entry_for_selection_drag(parent_dir, worktree, &dragged_selection, cx);
@@ -5295,6 +5641,364 @@ async fn test_highlight_entry_for_selection_drag(cx: &mut gpui::TestAppContext) 
             "Should always highlight directories"
         );
     });
+}
+
+#[gpui::test]
+async fn test_hide_root(cx: &mut gpui::TestAppContext) {
+    init_test(cx);
+
+    let fs = FakeFs::new(cx.executor().clone());
+    fs.insert_tree(
+        "/root1",
+        json!({
+            "dir1": {
+                "file1.txt": "content",
+                "file2.txt": "content",
+            },
+            "dir2": {
+                "file3.txt": "content",
+            },
+            "file4.txt": "content",
+        }),
+    )
+    .await;
+
+    fs.insert_tree(
+        "/root2",
+        json!({
+            "dir3": {
+                "file5.txt": "content",
+            },
+            "file6.txt": "content",
+        }),
+    )
+    .await;
+
+    // Test 1: Single worktree with hide_root = false
+    {
+        let project = Project::test(fs.clone(), ["/root1".as_ref()], cx).await;
+        let workspace =
+            cx.add_window(|window, cx| Workspace::test_new(project.clone(), window, cx));
+        let cx = &mut VisualTestContext::from_window(*workspace, cx);
+
+        cx.update(|_, cx| {
+            let settings = *ProjectPanelSettings::get_global(cx);
+            ProjectPanelSettings::override_global(
+                ProjectPanelSettings {
+                    hide_root: false,
+                    ..settings
+                },
+                cx,
+            );
+        });
+
+        let panel = workspace.update(cx, ProjectPanel::new).unwrap();
+
+        #[rustfmt::skip]
+        assert_eq!(
+            visible_entries_as_strings(&panel, 0..10, cx),
+            &[
+                "v root1",
+                "    > dir1",
+                "    > dir2",
+                "      file4.txt",
+            ],
+            "With hide_root=false and single worktree, root should be visible"
+        );
+    }
+
+    // Test 2: Single worktree with hide_root = true
+    {
+        let project = Project::test(fs.clone(), ["/root1".as_ref()], cx).await;
+        let workspace =
+            cx.add_window(|window, cx| Workspace::test_new(project.clone(), window, cx));
+        let cx = &mut VisualTestContext::from_window(*workspace, cx);
+
+        // Set hide_root to true
+        cx.update(|_, cx| {
+            let settings = *ProjectPanelSettings::get_global(cx);
+            ProjectPanelSettings::override_global(
+                ProjectPanelSettings {
+                    hide_root: true,
+                    ..settings
+                },
+                cx,
+            );
+        });
+
+        let panel = workspace.update(cx, ProjectPanel::new).unwrap();
+
+        assert_eq!(
+            visible_entries_as_strings(&panel, 0..10, cx),
+            &["> dir1", "> dir2", "  file4.txt",],
+            "With hide_root=true and single worktree, root should be hidden"
+        );
+
+        // Test expanding directories still works without root
+        toggle_expand_dir(&panel, "root1/dir1", cx);
+        assert_eq!(
+            visible_entries_as_strings(&panel, 0..10, cx),
+            &[
+                "v dir1  <== selected",
+                "      file1.txt",
+                "      file2.txt",
+                "> dir2",
+                "  file4.txt",
+            ],
+            "Should be able to expand directories even when root is hidden"
+        );
+    }
+
+    // Test 3: Multiple worktrees with hide_root = true
+    {
+        let project = Project::test(fs.clone(), ["/root1".as_ref(), "/root2".as_ref()], cx).await;
+        let workspace =
+            cx.add_window(|window, cx| Workspace::test_new(project.clone(), window, cx));
+        let cx = &mut VisualTestContext::from_window(*workspace, cx);
+
+        // Set hide_root to true
+        cx.update(|_, cx| {
+            let settings = *ProjectPanelSettings::get_global(cx);
+            ProjectPanelSettings::override_global(
+                ProjectPanelSettings {
+                    hide_root: true,
+                    ..settings
+                },
+                cx,
+            );
+        });
+
+        let panel = workspace.update(cx, ProjectPanel::new).unwrap();
+
+        assert_eq!(
+            visible_entries_as_strings(&panel, 0..10, cx),
+            &[
+                "v root1",
+                "    > dir1",
+                "    > dir2",
+                "      file4.txt",
+                "v root2",
+                "    > dir3",
+                "      file6.txt",
+            ],
+            "With hide_root=true and multiple worktrees, roots should still be visible"
+        );
+    }
+
+    // Test 4: Multiple worktrees with hide_root = false
+    {
+        let project = Project::test(fs.clone(), ["/root1".as_ref(), "/root2".as_ref()], cx).await;
+        let workspace =
+            cx.add_window(|window, cx| Workspace::test_new(project.clone(), window, cx));
+        let cx = &mut VisualTestContext::from_window(*workspace, cx);
+
+        cx.update(|_, cx| {
+            let settings = *ProjectPanelSettings::get_global(cx);
+            ProjectPanelSettings::override_global(
+                ProjectPanelSettings {
+                    hide_root: false,
+                    ..settings
+                },
+                cx,
+            );
+        });
+
+        let panel = workspace.update(cx, ProjectPanel::new).unwrap();
+
+        assert_eq!(
+            visible_entries_as_strings(&panel, 0..10, cx),
+            &[
+                "v root1",
+                "    > dir1",
+                "    > dir2",
+                "      file4.txt",
+                "v root2",
+                "    > dir3",
+                "      file6.txt",
+            ],
+            "With hide_root=false and multiple worktrees, roots should be visible"
+        );
+    }
+}
+
+#[gpui::test]
+async fn test_compare_selected_files(cx: &mut gpui::TestAppContext) {
+    init_test_with_editor(cx);
+
+    let fs = FakeFs::new(cx.executor().clone());
+    fs.insert_tree(
+        "/root",
+        json!({
+            "file1.txt": "content of file1",
+            "file2.txt": "content of file2",
+            "dir1": {
+                "file3.txt": "content of file3"
+            }
+        }),
+    )
+    .await;
+
+    let project = Project::test(fs.clone(), ["/root".as_ref()], cx).await;
+    let workspace = cx.add_window(|window, cx| Workspace::test_new(project.clone(), window, cx));
+    let cx = &mut VisualTestContext::from_window(*workspace, cx);
+    let panel = workspace.update(cx, ProjectPanel::new).unwrap();
+
+    let file1_path = path!("root/file1.txt");
+    let file2_path = path!("root/file2.txt");
+    select_path_with_mark(&panel, file1_path, cx);
+    select_path_with_mark(&panel, file2_path, cx);
+
+    panel.update_in(cx, |panel, window, cx| {
+        panel.compare_marked_files(&CompareMarkedFiles, window, cx);
+    });
+    cx.executor().run_until_parked();
+
+    workspace
+        .update(cx, |workspace, _, cx| {
+            let active_items = workspace
+                .panes()
+                .iter()
+                .filter_map(|pane| pane.read(cx).active_item())
+                .collect::<Vec<_>>();
+            assert_eq!(active_items.len(), 1);
+            let diff_view = active_items
+                .into_iter()
+                .next()
+                .unwrap()
+                .downcast::<FileDiffView>()
+                .expect("Open item should be an FileDiffView");
+            assert_eq!(diff_view.tab_content_text(0, cx), "file1.txt ↔ file2.txt");
+            assert_eq!(
+                diff_view.tab_tooltip_text(cx).unwrap(),
+                format!("{} ↔ {}", file1_path, file2_path)
+            );
+        })
+        .unwrap();
+
+    let file1_entry_id = find_project_entry(&panel, file1_path, cx).unwrap();
+    let file2_entry_id = find_project_entry(&panel, file2_path, cx).unwrap();
+    let worktree_id = panel.update(cx, |panel, cx| {
+        panel
+            .project
+            .read(cx)
+            .worktrees(cx)
+            .next()
+            .unwrap()
+            .read(cx)
+            .id()
+    });
+
+    let expected_entries = [
+        SelectedEntry {
+            worktree_id,
+            entry_id: file1_entry_id,
+        },
+        SelectedEntry {
+            worktree_id,
+            entry_id: file2_entry_id,
+        },
+    ];
+    panel.update(cx, |panel, _cx| {
+        assert_eq!(
+            &panel.marked_entries, &expected_entries,
+            "Should keep marked entries after comparison"
+        );
+    });
+
+    panel.update(cx, |panel, cx| {
+        panel.project.update(cx, |_, cx| {
+            cx.emit(project::Event::RevealInProjectPanel(file2_entry_id))
+        })
+    });
+
+    panel.update(cx, |panel, _cx| {
+        assert_eq!(
+            &panel.marked_entries, &expected_entries,
+            "Marked entries should persist after focusing back on the project panel"
+        );
+    });
+}
+
+#[gpui::test]
+async fn test_compare_files_context_menu(cx: &mut gpui::TestAppContext) {
+    init_test_with_editor(cx);
+
+    let fs = FakeFs::new(cx.executor().clone());
+    fs.insert_tree(
+        "/root",
+        json!({
+            "file1.txt": "content of file1",
+            "file2.txt": "content of file2",
+            "dir1": {},
+            "dir2": {
+                "file3.txt": "content of file3"
+            }
+        }),
+    )
+    .await;
+
+    let project = Project::test(fs.clone(), ["/root".as_ref()], cx).await;
+    let workspace = cx.add_window(|window, cx| Workspace::test_new(project.clone(), window, cx));
+    let cx = &mut VisualTestContext::from_window(*workspace, cx);
+    let panel = workspace.update(cx, ProjectPanel::new).unwrap();
+
+    // Test 1: When only one file is selected, there should be no compare option
+    select_path(&panel, "root/file1.txt", cx);
+
+    let selected_files = panel.update(cx, |panel, cx| panel.file_abs_paths_to_diff(cx));
+    assert_eq!(
+        selected_files, None,
+        "Should not have compare option when only one file is selected"
+    );
+
+    // Test 2: When multiple files are selected, there should be a compare option
+    select_path_with_mark(&panel, "root/file1.txt", cx);
+    select_path_with_mark(&panel, "root/file2.txt", cx);
+
+    let selected_files = panel.update(cx, |panel, cx| panel.file_abs_paths_to_diff(cx));
+    assert!(
+        selected_files.is_some(),
+        "Should have files selected for comparison"
+    );
+    if let Some((file1, file2)) = selected_files {
+        assert!(
+            file1.to_string_lossy().ends_with("file1.txt")
+                && file2.to_string_lossy().ends_with("file2.txt"),
+            "Should have file1.txt and file2.txt as the selected files when multi-selecting"
+        );
+    }
+
+    // Test 3: Selecting a directory shouldn't count as a comparable file
+    select_path_with_mark(&panel, "root/dir1", cx);
+
+    let selected_files = panel.update(cx, |panel, cx| panel.file_abs_paths_to_diff(cx));
+    assert!(
+        selected_files.is_some(),
+        "Directory selection should not affect comparable files"
+    );
+    if let Some((file1, file2)) = selected_files {
+        assert!(
+            file1.to_string_lossy().ends_with("file1.txt")
+                && file2.to_string_lossy().ends_with("file2.txt"),
+            "Selecting a directory should not affect the number of comparable files"
+        );
+    }
+
+    // Test 4: Selecting one more file
+    select_path_with_mark(&panel, "root/dir2/file3.txt", cx);
+
+    let selected_files = panel.update(cx, |panel, cx| panel.file_abs_paths_to_diff(cx));
+    assert!(
+        selected_files.is_some(),
+        "Directory selection should not affect comparable files"
+    );
+    if let Some((file1, file2)) = selected_files {
+        assert!(
+            file1.to_string_lossy().ends_with("file2.txt")
+                && file2.to_string_lossy().ends_with("file3.txt"),
+            "Selecting a directory should not affect the number of comparable files"
+        );
+    }
 }
 
 fn select_path(panel: &Entity<ProjectPanel>, path: impl AsRef<Path>, cx: &mut VisualTestContext) {
@@ -5331,7 +6035,7 @@ fn select_path_with_mark(
                     entry_id,
                 };
                 if !panel.marked_entries.contains(&entry) {
-                    panel.marked_entries.insert(entry);
+                    panel.marked_entries.push(entry);
                 }
                 panel.selection = Some(entry);
                 return;
@@ -5387,12 +6091,16 @@ fn visible_entries_as_strings(
             } else {
                 "  "
             };
+            #[cfg(windows)]
+            let filename = details.filename.replace("\\", "/");
+            #[cfg(not(windows))]
+            let filename = details.filename;
             let name = if details.is_editing {
-                format!("[EDITOR: '{}']", details.filename)
+                format!("[EDITOR: '{}']", filename)
             } else if details.is_processing {
-                format!("[PROCESSING: '{}']", details.filename)
+                format!("[PROCESSING: '{}']", filename)
             } else {
-                details.filename.clone()
+                filename
             };
             let selected = if details.is_selected {
                 "  <== selected"

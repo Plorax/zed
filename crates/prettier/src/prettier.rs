@@ -54,9 +54,17 @@ impl Prettier {
         ".prettierrc.toml",
         ".prettierrc.js",
         ".prettierrc.cjs",
+        ".prettierrc.mjs",
+        ".prettierrc.ts",
+        ".prettierrc.cts",
+        ".prettierrc.mts",
         "package.json",
         "prettier.config.js",
         "prettier.config.cjs",
+        "prettier.config.mjs",
+        "prettier.config.ts",
+        "prettier.config.cts",
+        "prettier.config.mts",
         ".editorconfig",
         ".prettierignore",
     ];
@@ -292,7 +300,7 @@ impl Prettier {
 
         let server = cx
             .update(|cx| {
-                let params = server.default_initialize_params(cx);
+                let params = server.default_initialize_params(false, cx);
                 let configuration = lsp::DidChangeConfigurationParams {
                     settings: Default::default(),
                 };
@@ -452,14 +460,13 @@ impl Prettier {
                             },
                         })
                     })?
-                    .context("prettier params calculation")?;
+                    .context("building prettier request")?;
 
                 let response = local
                     .server
                     .request::<Format>(params)
                     .await
-                    .into_response()
-                    .context("prettier format")?;
+                    .into_response()?;
                 let diff_task = buffer.update(cx, |buffer, cx| buffer.diff(response.text, cx))?;
                 Ok(diff_task.await)
             }
